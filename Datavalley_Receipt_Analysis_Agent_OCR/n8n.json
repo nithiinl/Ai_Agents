@@ -1,0 +1,132 @@
+{
+    "nodes": [
+      {
+        "parameters": {},
+        "name": "Manual Trigger",
+        "type": "n8n-nodes-base.manualTrigger",
+        "typeVersion": 1,
+        "position": [100, 300]
+      },
+      {
+        "parameters": {
+          "path": "/absolute/path/to/receipts",     
+          "options": {}
+        },
+        "name": "Read Binary Files",
+        "type": "n8n-nodes-base.readBinaryFiles",
+        "typeVersion": 1,
+        "position": [300, 300]
+      },
+      {
+        "parameters": {
+          "batchSize": 1
+        },
+        "name": "SplitInBatches",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 1,
+        "position": [500, 300]
+      },
+      {
+        "parameters": {
+          "operation": "getText",
+          "binaryPropertyName": "data"
+        },
+        "name": "Extract Text",
+        "type": "n8n-nodes-base.pdf",
+        "typeVersion": 1,
+        "position": [700, 300]
+      },
+      {
+        "parameters": {
+          "functionCode": "const text = Buffer.from(items[0].binary.data.data, 'base64').toString('utf8');\n\n// Adapt these regexes to your receipts\nconst companyMatch = text.match(/(?:Company|Provider):?\\s*([A-Za-z &]+)/i);\nconst dateMatch    = text.match(/Date:?\\s*(\\d{2}\\/\\d{2}\\/\\d{4})/i);\nconst amountMatch  = text.match(/Total(?: Amount)?:?\\s*\\$?([0-9,]+\\.?[0-9]{0,2})/i);\n\nconst companyName = companyMatch ? companyMatch[1].trim() : 'Unknown';\nlet receiptDate = null;\nif (dateMatch) {\n  // convert MM/DD/YYYY → YYYY-MM-DD\n  const [m,d,y] = dateMatch[1].split('/');\n  receiptDate = `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;\n}\nconst amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;\n\nreturn [{ json: { companyName, receiptDate, amount } }];"
+        },
+        "name": "Parse Receipt",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 1,
+        "position": [900, 300]
+      },
+      {
+        "parameters": {},
+        "name": "Merge",
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 1,
+        "position": [1100, 300]
+      },
+      {
+        "parameters": {
+          "functionCode": "// Group by companyName & sort by date\nconst grouped = {};\n\nfor (const item of items) {\n  const { companyName, receiptDate, amount } = item.json;\n  if (!grouped[companyName]) grouped[companyName] = [];\n  grouped[companyName].push({ receiptDate, amount });\n}\n\n// sort each array by date ascending\nfor (const comp in grouped) {\n  grouped[comp].sort((a, b) => new Date(a.receiptDate) - new Date(b.receiptDate));\n}\n\n// transform to array of objects\nconst output = Object.entries(grouped).map(([companyName, receipts]) => ({ companyName, receipts }));\n\nreturn output.map(o => ({ json: o }));"
+        },
+        "name": "Group & Sort",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 1,
+        "position": [1300, 300]
+      },
+      {
+        "parameters": {
+          "fileName": "grouped_receipts.json",
+          "dataPropertyName": "data",      // write the JSON from items[].json.data
+          "binaryProperty": null,
+          "options": {}
+        },
+        "name": "Write JSON File",
+        "type": "n8n-nodes-base.writeFile",
+        "typeVersion": 1,
+        "position": [1500, 300]
+      }
+    ],
+    "connections": {
+      "Manual Trigger": {
+        "main": [
+          [
+            { "node": "Read Binary Files", "type": "main", "index": 0 }
+          ]
+        ]
+      },
+      "Read Binary Files": {
+        "main": [
+          [
+            { "node": "SplitInBatches", "type": "main", "index": 0 }
+          ]
+        ]
+      },
+      "SplitInBatches": {
+        "main": [
+          [
+            { "node": "Extract Text", "type": "main", "index": 0 }
+          ]
+        ]
+      },
+      "Extract Text": {
+        "main": [
+          [
+            { "node": "Parse Receipt", "type": "main", "index": 0 }
+          ]
+        ]
+      },
+      "Parse Receipt": {
+        "main": [
+          [
+            { "node": "Merge", "type": "main", "index": 0 }
+          ]
+        ]
+      },
+      "Merge": {
+        "main": [
+          [
+            { "node": "Group & Sort", "type": "main", "index": 0 }
+          ]
+        ]
+      },
+      "Group & Sort": {
+        "main": [
+          [
+            { "node": "Write JSON File", "type": "main", "index": 0 }
+          ]
+        ]
+      }
+    },
+    "active": false,
+    "settings": {},
+    "name": "Extract & Group Medical Receipts"
+  }
+  
